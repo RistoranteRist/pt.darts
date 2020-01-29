@@ -3,18 +3,22 @@ import torch
 import torch.nn as nn
 import genotypes as gt
 
+# TODO: Why skip_connect dors FactorizedReduce if stride == 2
+# In reduction cell, skip connect should not reduce the size of tensors
 
 OPS = {
     'none': lambda C, stride, affine: Zero(stride),
     'avg_pool_3x3': lambda C, stride, affine: PoolBN('avg', C, 3, stride, 1, affine=affine),
     'max_pool_3x3': lambda C, stride, affine: PoolBN('max', C, 3, stride, 1, affine=affine),
-    'skip_connect': lambda C, stride, affine: \
-        Identity() if stride == 1 else FactorizedReduce(C, C, affine=affine),
+    'skip_connect': lambda C, stride, affine:
+    Identity(),  # if stride == 1 else FactorizedReduce(C, C, affine=affine),
     'sep_conv_3x3': lambda C, stride, affine: SepConv(C, C, 3, stride, 1, affine=affine),
     'sep_conv_5x5': lambda C, stride, affine: SepConv(C, C, 5, stride, 2, affine=affine),
     'sep_conv_7x7': lambda C, stride, affine: SepConv(C, C, 7, stride, 3, affine=affine),
-    'dil_conv_3x3': lambda C, stride, affine: DilConv(C, C, 3, stride, 2, 2, affine=affine), # 5x5
-    'dil_conv_5x5': lambda C, stride, affine: DilConv(C, C, 5, stride, 4, 2, affine=affine), # 9x9
+    # 5x5
+    'dil_conv_3x3': lambda C, stride, affine: DilConv(C, C, 3, stride, 2, 2, affine=affine),
+    # 9x9
+    'dil_conv_5x5': lambda C, stride, affine: DilConv(C, C, 5, stride, 4, 2, affine=affine),
     'conv_7x1_1x7': lambda C, stride, affine: FacConv(C, C, 7, stride, 3, affine=affine)
 }
 
@@ -51,6 +55,7 @@ class PoolBN(nn.Module):
     """
     AvgPool or MaxPool - BN
     """
+
     def __init__(self, pool_type, C, kernel_size, stride, padding, affine=True):
         """
         Args:
@@ -60,7 +65,8 @@ class PoolBN(nn.Module):
         if pool_type.lower() == 'max':
             self.pool = nn.MaxPool2d(kernel_size, stride, padding)
         elif pool_type.lower() == 'avg':
-            self.pool = nn.AvgPool2d(kernel_size, stride, padding, count_include_pad=False)
+            self.pool = nn.AvgPool2d(
+                kernel_size, stride, padding, count_include_pad=False)
         else:
             raise ValueError()
 
@@ -76,6 +82,7 @@ class StdConv(nn.Module):
     """ Standard conv
     ReLU - Conv - BN
     """
+
     def __init__(self, C_in, C_out, kernel_size, stride, padding, affine=True):
         super().__init__()
         self.net = nn.Sequential(
@@ -92,12 +99,15 @@ class FacConv(nn.Module):
     """ Factorized conv
     ReLU - Conv(Kx1) - Conv(1xK) - BN
     """
+
     def __init__(self, C_in, C_out, kernel_length, stride, padding, affine=True):
         super().__init__()
         self.net = nn.Sequential(
             nn.ReLU(),
-            nn.Conv2d(C_in, C_in, (kernel_length, 1), stride, padding, bias=False),
-            nn.Conv2d(C_in, C_out, (1, kernel_length), stride, padding, bias=False),
+            nn.Conv2d(C_in, C_in, (kernel_length, 1),
+                      stride, padding, bias=False),
+            nn.Conv2d(C_in, C_out, (1, kernel_length),
+                      stride, padding, bias=False),
             nn.BatchNorm2d(C_out, affine=affine)
         )
 
@@ -112,6 +122,7 @@ class DilConv(nn.Module):
     If dilation == 2, 3x3 conv => 5x5 receptive field
                       5x5 conv => 9x9 receptive field
     """
+
     def __init__(self, C_in, C_out, kernel_size, stride, padding, dilation, affine=True):
         super().__init__()
         self.net = nn.Sequential(
@@ -130,11 +141,14 @@ class SepConv(nn.Module):
     """ Depthwise separable conv
     DilConv(dilation=1) * 2
     """
+
     def __init__(self, C_in, C_out, kernel_size, stride, padding, affine=True):
         super().__init__()
         self.net = nn.Sequential(
-            DilConv(C_in, C_in, kernel_size, stride, padding, dilation=1, affine=affine),
-            DilConv(C_in, C_out, kernel_size, 1, padding, dilation=1, affine=affine)
+            DilConv(C_in, C_in, kernel_size, stride,
+                    padding, dilation=1, affine=affine),
+            DilConv(C_in, C_out, kernel_size, 1,
+                    padding, dilation=1, affine=affine)
         )
 
     def forward(self, x):
@@ -166,11 +180,14 @@ class FactorizedReduce(nn.Module):
     """
     Reduce feature map size by factorized pointwise(stride=2).
     """
+
     def __init__(self, C_in, C_out, affine=True):
         super().__init__()
         self.relu = nn.ReLU()
-        self.conv1 = nn.Conv2d(C_in, C_out // 2, 1, stride=2, padding=0, bias=False)
-        self.conv2 = nn.Conv2d(C_in, C_out // 2, 1, stride=2, padding=0, bias=False)
+        self.conv1 = nn.Conv2d(C_in, C_out // 2, 1,
+                               stride=2, padding=0, bias=False)
+        self.conv2 = nn.Conv2d(C_in, C_out // 2, 1,
+                               stride=2, padding=0, bias=False)
         self.bn = nn.BatchNorm2d(C_out, affine=affine)
 
     def forward(self, x):
@@ -182,6 +199,7 @@ class FactorizedReduce(nn.Module):
 
 class MixedOp(nn.Module):
     """ Mixed operation """
+
     def __init__(self, C, stride):
         super().__init__()
         self._ops = nn.ModuleList()
